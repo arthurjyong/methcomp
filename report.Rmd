@@ -1,0 +1,278 @@
+---
+output: 
+  pdf_document:
+    keep_tex: false
+header-includes:
+  - "\\geometry{margin=0.25in}"
+---
+
+
+```{r echo=FALSE, results='asis', message=FALSE, warning=FALSE}
+
+# Custom function to format the ICC results for pretty printing
+format_icc <- function(icc_result) {
+  output <- capture.output(print(icc_result))
+  output <- output[!grepl("^##", output)]
+  cat(paste(output, collapse = "\n"), "\n\n")
+}
+
+# Custom function to format the Pearson Correlation Coefficient Test
+format_cor_test <- function(cor_test_obj) {
+  
+  # Check if the input is of class "htest"
+  if(!inherits(cor_test_obj, "htest")) stop("The input object should be of class 'htest'")
+  
+  # Extract relevant values from correlation test object
+  t_value <- cor_test_obj$statistic
+  df <- cor_test_obj$parameter
+  p_value <- cor_test_obj$p.value
+  conf_low <- cor_test_obj$conf.int[1]
+  conf_high <- cor_test_obj$conf.int[2]
+  correlation <- cor_test_obj$estimate
+  
+  # Handle very small p-values
+  if(p_value < .Machine$double.eps) {
+    p_string <- "< 2.2e-16"
+  } else {
+    p_string <- sprintf("%.6f", p_value)
+  }
+  
+  # Format the results into a string for RMarkdown
+  result_string <- sprintf(
+    "t = %.3f, df = %.2f, p-value = %s  \n95\\%% confidence interval: [%.3f, %.3f]  \nSample estimate:  \nCorrelation (r) = %.3f",
+    t_value, df, p_string, conf_low, conf_high, correlation
+  )
+  
+  return(result_string)
+}
+
+# Custom function to format the Paired T Test results for pretty printing
+format_ttest <- function(ttest_obj) {
+  
+  # Check if the input is of class "htest"
+  if(!inherits(ttest_obj, "htest")) stop("The input object should be of class 'htest'")
+  
+  # Extract relevant values from t-test object
+  t_value <- ttest_obj$statistic
+  df <- ttest_obj$parameter
+  p_value <- ttest_obj$p.value
+  conf_low <- ttest_obj$conf.int[1]
+  conf_high <- ttest_obj$conf.int[2]
+  mean_diff <- mean(ttest_obj$estimate)
+  
+  # Format the results into a string for RMarkdown
+  result_string <- sprintf(
+    "t = %.3f, df = %.2f, p-value = %.6f  \n95\\%% confidence interval: [%.3f, %.3f]  \nSample estimates: Mean difference = %.3f",
+    t_value, df, p_value, conf_low, conf_high, mean_diff
+  )
+  
+  return(result_string)
+}
+
+# Custom function to format the Unpaired T Test results for pretty printing
+format_unpaired_ttest <- function(ttest_obj) {
+  
+  # Check if the input is of class "htest"
+  if(!inherits(ttest_obj, "htest")) stop("The input object should be of class 'htest'")
+  
+  # Extract relevant values
+  t_value <- ttest_obj$statistic
+  df <- ttest_obj$parameter
+  p_value <- ttest_obj$p.value
+  conf_low <- ttest_obj$conf.int[1]
+  conf_high <- ttest_obj$conf.int[2]
+  mean_x <- ttest_obj$estimate[1]
+  mean_y <- ttest_obj$estimate[2]
+  
+  # Format the results into a string for RMarkdown
+  result_string <- sprintf(
+    "t = %.3f, df = %.2f, p-value = %.6f  \n95\\%% confidence interval: [%.3f, %.3f]  \nSample estimates:  \nMean of x = %.3f, Mean of y = %.3f",
+    t_value, df, p_value, conf_low, conf_high, mean_x, mean_y
+  )
+  
+  return(result_string)
+}
+
+# Custom function to format the Passing-Bablok results for pretty printing
+format_pb <- function(ttest_obj, input_names) {
+  
+  # Extract relevant values from t-test object
+  pb_intercept <- ttest_obj$coefficients["Intercept", "Estimate"]
+  pb_intercept_lci <- ttest_obj$coefficients["Intercept", "2.5%CI"]
+  pb_intercept_uci <- ttest_obj$coefficients["Intercept", "97.5%CI"]
+  pb_slope <- ttest_obj$coefficients["Slope", "Estimate"]
+  pb_slope_lci <- ttest_obj$coefficients["Slope", "2.5%CI"]
+  pb_slope_uci <- ttest_obj$coefficients["Slope", "97.5%CI"]
+  
+  # Format the results into a string for RMarkdown
+  result_string <- sprintf(
+    "%s = %.2f [%.2f to %.2f] %s + %.2f [%.2f to %.2f]",
+    input_names[[2]], pb_slope, pb_slope_lci, pb_slope_uci, 
+    input_names[[1]], pb_intercept, pb_intercept_lci, pb_intercept_uci
+  )
+  
+  return(result_string)
+}
+
+# Custom function to format the Shapiro-Wilk results for pretty printing
+format_shapiro <- function(shapiro_result) {
+  output <- capture.output(print(shapiro_result))
+  output <- output[grepl("^W", output)] # Keep only the line that starts with "W"
+  cat(paste(output, collapse = "\n"), "\n\n")
+}
+
+# Custom function to format the D’Agostino-Pearson results for pretty printing
+format_agostino <- function(agostino_result) {
+    output <- capture.output(print(agostino_result))
+    
+    # Extract the line with the skew, z, and p-value information
+    result_line <- grep("^skew", output, value = TRUE)
+    
+    # Split the result line to remove the part after "p-value"
+    result_parts <- strsplit(result_line, "alternative hypothesis: ")[[1]]
+    formatted_result <- result_parts[1]
+    cat(formatted_result, "\n\n")
+}
+
+# Custom function to format the Kolmogorov-Smirnov test results for pretty printing
+format_ks <- function(ks_result) {
+  output <- capture.output(print(ks_result))
+  
+  # Extract the lines that have the "D =" and "p-value =" information
+  relevant_lines <- output[grepl("^D =", output) | grepl("^p-value", output)]
+  
+  cat(paste(relevant_lines, collapse = ", "), "\n\n")
+}
+
+# Custom function to format the polynomial regression summary for pretty printing
+simplify_poly_sum <- function(summary_output) {
+  
+  # Extracting R-squared and Adjusted R-squared
+  r_squared <- summary_output$r.squared
+  adj_r_squared <- summary_output$adj.r.squared
+  
+  # Extracting the F-statistic and its p-value
+  fstatistic <- summary_output$fstatistic
+  f_value <- fstatistic["value"]
+  p_value <- pf(f_value, fstatistic["numdf"], fstatistic["dendf"], lower.tail = FALSE)
+  
+  # Creating the formatted output string
+  formatted_output <- paste(
+    sprintf("R-squared: %.2f", r_squared), 
+    "\n\n\n",
+    sprintf("Adjusted R-squared: %.2f", adj_r_squared),
+    "\n\n\n",
+    sprintf("F-statistic: %.2f on %d and %d DF \n\n\n p-value: %.2f", 
+            f_value, 
+            fstatistic["numdf"], 
+            fstatistic["dendf"], 
+            p_value),
+    "\n\n"
+  )
+  return(formatted_output)
+}
+
+coef_poly_sum <- function(summary_output){
+
+  # Extracting the coefficients table
+  coefs <- summary_output$coefficients
+  
+  if (nrow(coefs) == 3){
+    rownames(coefs) <- c("Intercept", "$x$", "$x^2$")
+  } else if (nrow(coefs) == 4) {
+    rownames(coefs) <- c("Intercept", "$x$", "$x^2$", "$x^3$")
+  }
+  
+  coefs <- round(coefs, digits = 2)
+  coefs <- kable(coefs, format = "markdown", align = "l", position = "left")
+  
+  return(coefs)
+}
+
+# Generation of markdown content
+for (i in seq_along(column_titles_1)) {
+  cat(paste0("# ", column_titles_1[[i]], "\n\n"))
+  
+  cat(paste0("## ", "ICC Results", "\n\n"))
+  cat(format_icc(icc_results_list[[i]]))
+  cat("\n")
+  
+  cat(paste0("## ", "Pearson Product-Moment Correlation", "\n\n"))
+  cat(format_cor_test(pearson_results_list[[i]]))
+  cat("\n")
+  cat("\n\n")
+  
+  cat(paste0("## ", "Passing-Bablok Regression", "\n\n"))
+  cat(format_pb(pb_results_list[[i]],input_names))
+  cat("\n")
+  cat("\n\n")
+  plot(pb_plot_results_list[[i]])
+  cat("\n\n")
+  
+  cat(paste0("## ", "Bland-Altman plots", "\n\n"))
+  cat("\n")
+  cat(paste0("### ", "Differences as units", "\n\n"))
+  cat("\n\n")
+  plot(ba_plot_results_list[[i]])
+  cat("\n\n")
+  cat(paste0("### ", "Differences as percentage", "\n\n"))
+  cat("\n\n")
+  plot(pba_plot_results_list[[i]])
+  cat("\n")
+  cat("\n\n")
+  
+  cat(paste0("## ", "Normal distribution test", "\n\n"))
+  cat("\n")
+  cat(paste0("### ", "Distribution plot", "\n\n"))
+  cat("\n\n")
+  plot(hst_plot_results_list[[i]])
+  cat("\n\n")
+  cat(paste0("### ", "Shapiro-Wilk test", "\n\n"))
+  cat(format_shapiro(shapiro_results_list[[i]]))
+  cat("\n")
+  cat(paste0("### ", "D’Agostino-Pearson test", "\n\n"))
+  cat(format_agostino(agostino_results_list[[i]]))
+  cat("\n")
+  cat("\n\n")
+  # cat(paste0("### ", "Kolmogorov-Smirnov test", "\n\n"))
+  # cat(format_ks(ks_results_list[[i]]))
+  # cat("\n *ties should not be present for the Kolmogorov-Smirnov test")
+
+  cat(paste0("## ", "Paired T Test Results", "\n\n"))
+  cat(format_ttest(paired_t_results_list[[i]]))
+  cat("\n")
+  cat("\n\n")
+  
+  cat(paste0("## ", "Unpaired T Test Results", "\n\n"))
+  cat(format_unpaired_ttest(unpaired_t_results_list[[i]]))
+  cat("\n")
+  cat("\n\n")
+  
+  cat("\\newpage")
+  
+  cat(paste0("# ", "Polynomial regression", "\n\n"))
+  cat(paste0("## ", "Quadratic regression", "\n\n"))
+  cat("Coefficients:\n\n")
+  print(coef_poly_sum(quad_fit_results_list[[i]]))
+  cat(simplify_poly_sum(quad_fit_results_list[[i]]))
+  cat("\n")
+  cat("\n\n")
+  plot(quad_fit_plot_results_list[[i]])
+  cat("\n\n")
+  
+  cat("\\newpage")
+  
+  cat(paste0("## ", "Cubic regression", "\n\n"))
+  cat("Coefficients:\n\n")
+  print(coef_poly_sum(cubic_fit_results_list[[i]]))
+  cat(simplify_poly_sum(cubic_fit_results_list[[i]]))
+  cat("\n")
+  cat("\n\n")
+  plot(cubic_fit_plot_results_list[[i]])
+  cat("\n\n")
+
+  if (i < length(column_titles_1)) { # Don't insert a page break after the last section
+    cat("\\newpage")
+  }
+}
+```
